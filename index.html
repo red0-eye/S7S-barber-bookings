@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حجوزات s7s</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,sans-serif; }
+  body { background:#1a1a2e; color:#eee; min-height:100vh; display:flex; justify-content:center; align-items:center; padding:20px; }
+  .card { background:#16213e; padding:30px; border-radius:20px; width:100%; max-width:400px; box-shadow:0 10px 40px rgba(0,0,0,.5); text-align:center; }
+  h1 { color:#e94560; margin-bottom:20px; font-size:28px; }
+  input { width:100%; padding:14px; border:none; border-radius:10px; margin-bottom:15px; font-size:16px; background:#0f3460; color:#fff; }
+  input::placeholder { color:#8899aa; }
+  button { width:100%; padding:14px; border:none; border-radius:10px; background:#e94560; color:#fff; font-size:18px; font-weight:bold; cursor:pointer; transition:.3s; }
+  button:hover { background:#c73650; }
+  button:disabled { background:#555; cursor:not-allowed; }
+  .ticket { background:#0f3460; padding:20px; border-radius:15px; margin-top:20px; display:none; }
+  .ticket .number { font-size:60px; color:#e94560; font-weight:bold; }
+  .ticket .label { color:#8899aa; font-size:14px; margin-top:5px; }
+  .status { margin-top:15px; padding:12px; border-radius:10px; font-weight:bold; background:#0f3460; }
+  .status.warn { background:#ff9800; color:#000; animation:pulse 1s infinite; }
+  .status.go { background:#4caf50; color:#fff; animation:pulse .6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  .queue-info { margin-top:15px; color:#8899aa; font-size:15px; line-height:1.8; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>💈 حجوزات s7s</h1>
+
+  <div id="loginBox">
+    <input id="nameInput" type="text" placeholder="اكتب اسمك" />
+    <button id="bookBtn" onclick="book()">احجز دورك</button>
+  </div>
+
+  <div id="ticketBox" class="ticket">
+    <p class="label">رقم دورك</p>
+    <div class="number" id="myNumber">-</div>
+    <div class="status" id="myStatus">في الانتظار...</div>
+    <div class="queue-info" id="queueInfo"></div>
+    <button style="margin-top:20px; background:#555;" onclick="cancelBooking()">إلغاء الحجز</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+let myDocId = localStorage.getItem('myBookingId');
+let lastStatus = '';
+let audioCtx = null;
+
+// طلب إذن الإشعارات
+if ("Notification" in window) Notification.requestPermission();
+
+// صوت التنبيه
+function playBeep(type) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.frequency.value = type === 'go' ? 1000 : 600;
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+    if (type === 'go') setTimeout(() => playBeep('go'), 600);
+  } catch(e) {}
+}
+
+function notify(title, body) {
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '' });
+  }
+  playBeep(body.includes('دورك') ? 'go' : 'warn');
+}
+
+async function book() {
+  const name = document.getElementById('nameInput').value.trim();
+  if (!name) return alert('اكتب اسمك أولاً');
+
+  const btn = document.getElementById('bookBtn');
+  btn.disabled = true; btn.textContent = 'جاري الحجز...';
+
+  try {
+    // جلب أعلى رقم دور
+    const snap = await db.collection('bookings')
+      .where('status','==','waiting')
+      .orderBy('number','desc').limit(1).get();
+    const nextNum = snap.empty ? 1 : snap.docs[0].data().number + 1;
+
+    const doc = await db.collection('bookings').add({
+      name, number: nextNum, status: 'waiting',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    myDocId = doc.id;
+    localStorage.setItem('myBookingId', myDocId);
+    showTicket();
+  } catch(e) {
+    alert('خطأ: ' + e.message);
+    btn.disabled = false; btn.textContent = 'احجز دورك';
+  }
+}
+
+async function cancelBooking() {
+  if (!myDocId) return;
+  await db.collection('bookings').doc(myDocId).delete();
+  localStorage.removeItem('myBookingId');
+  myDocId = null;
+  location.reload();
+}
+
+function showTicket() {
+  document.getElementById('loginBox').classList.add('hidden');
+  document.getElementById('ticketBox').style.display = 'block';
+}
+
+// الاستماع للتغييرات
+function listen() {
+  if (!myDocId) {
+    document.getElementById('loginBox').style.display = 'block';
+    return;
+  }
+  db.collection('bookings').doc(myDocId).onSnapshot(async doc => {
+    if (!doc.exists) {
+      localStorage.removeItem('myBookingId');
+      myDocId = null;
+      document.getElementById('ticketBox').style.display = 'none';
+      document.getElementById('loginBox').style.display = 'block';
+      document.getElementById('loginBox').classList.remove('hidden');
+      return;
+    }
+    showTicket();
+    const data = doc.data();
+    document.getElementById('myNumber').textContent = data.number;
+
+    // جلب عدد اللي قبله
+    const snap = await db.collection('bookings')
+      .where('status','==','waiting')
+      .where('number','<',data.number)
+      .get();
+    const ahead = snap.size;
+
+    const statusEl = document.getElementById('myStatus');
+    const infoEl = document.getElementById('queueInfo');
+
+    if (data.status === 'serving') {
+      statusEl.textContent = '🎉 دورك الآن! تفضل';
+      statusEl.className = 'status go';
+      infoEl.textContent = '';
+      if (lastStatus !== 'serving') notify('💈 حجوزات s7s', 'دورك الآن! تفضل للحلاق');
+    } else if (ahead === 0) {
+      statusEl.textContent = '⚡ أنت التالي! استعد';
+      statusEl.className = 'status warn';
+      infoEl.textContent = 'الحلاق جاهز يستقبلك';
+      if (lastStatus !== 'next') notify('💈 حجوزات s7s', 'أنت التالي! استعد — دورك قرب');
+    } else {
+      statusEl.textContent = 'في الانتظار...';
+      statusEl.className = 'status';
+      infoEl.textContent = `أمامك ${ahead} ${ahead === 1 ? 'شخص' : 'أشخاص'}`;
+    }
+    lastStatus = data.status === 'serving' ? 'serving' : (ahead === 0 ? 'next' : 'waiting');
+  });
+}
+
+listen();
+</script>
+</body>
+  </html>
