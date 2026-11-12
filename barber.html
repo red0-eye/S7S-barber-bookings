@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لوحة الحلاق - s7s</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,sans-serif; }
+  body { background:#1a1a2e; color:#eee; padding:20px; }
+  .container { max-width:600px; margin:0 auto; }
+  h1 { color:#e94560; text-align:center; margin-bottom:25px; }
+  .current { background:#0f3460; padding:25px; border-radius:20px; text-align:center; margin-bottom:20px; }
+  .current .num { font-size:70px; color:#4caf50; font-weight:bold; }
+  .current .name { font-size:22px; margin:10px 0; }
+  .current button { margin-top:15px; padding:15px 40px; font-size:20px; border:none; border-radius:10px; background:#4caf50; color:#fff; cursor:pointer; font-weight:bold; }
+  .current button:hover { background:#388e3c; }
+  .current button:disabled { background:#555; cursor:not-allowed; }
+  .next-list { background:#16213e; padding:20px; border-radius:20px; }
+  .next-list h2 { color:#e94560; font-size:18px; margin-bottom:15px; }
+  .item { display:flex; justify-content:space-between; padding:12px; background:#0f3460; border-radius:10px; margin-bottom:10px; }
+  .item .n { color:#e94560; font-weight:bold; font-size:20px; }
+  .item .del { background:#e94560; border:none; color:#fff; padding:5px 12px; border-radius:6px; cursor:pointer; }
+  .empty { text-align:center; color:#8899aa; padding:20px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>💈 لوحة الحلاق</h1>
+
+  <div class="current">
+    <p style="color:#8899aa">الدور الحالي</p>
+    <div class="num" id="currentNum">-</div>
+    <div class="name" id="currentName">لا يوجد</div>
+    <button id="nextBtn" onclick="nextCustomer()" disabled>التالي ▶</button>
+  </div>
+
+  <div class="next-list">
+    <h2>📋 قائمة الانتظار</h2>
+    <div id="queueList"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+let currentId = null;
+
+db.collection('bookings').where('status','==','waiting').orderBy('number')
+  .onSnapshot(async snap => {
+    // تحديث الحالي (serving)
+    const servingSnap = await db.collection('bookings').where('status','==','serving').limit(1).get();
+    if (!servingSnap.empty) {
+      const d = servingSnap.docs[0];
+      currentId = d.id;
+      document.getElementById('currentNum').textContent = d.data().number;
+      document.getElementById('currentName').textContent = d.data().name;
+      document.getElementById('nextBtn').disabled = false;
+    } else {
+      currentId = null;
+      document.getElementById('currentNum').textContent = '-';
+      document.getElementById('currentName').textContent = 'لا يوجد';
+      document.getElementById('nextBtn').disabled = snap.empty;
+    }
+
+    // قائمة الانتظار
+    const list = document.getElementById('queueList');
+    if (snap.empty) {
+      list.innerHTML = '<div class="empty">لا يوجد حجوزات حالياً</div>';
+      return;
+    }
+    list.innerHTML = snap.docs.map(doc => {
+      const d = doc.data();
+      return `<div class="item">
+        <span><span class="n">#${d.number}</span> — ${d.name}</span>
+        <button class="del" onclick="removeBooking('${doc.id}')">حذف</button>
+      </div>`;
+    }).join('');
+  });
+
+async function nextCustomer() {
+  // إنهاء الحالي
+  if (currentId) {
+    await db.collection('bookings').doc(currentId).update({ status: 'done' });
+  }
+  // بدء التالي
+  const snap = await db.collection('bookings').where('status','==','waiting').orderBy('number').limit(1).get();
+  if (!snap.empty) {
+    await db.collection('bookings').doc(snap.docs[0].id).update({ status: 'serving' });
+  }
+}
+
+async function removeBooking(id) {
+  if (confirm('حذف هذا الحجز؟')) await db.collection('bookings').doc(id).delete();
+}
+</script>
+</body>
+</html>
