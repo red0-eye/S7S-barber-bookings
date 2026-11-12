@@ -46,47 +46,51 @@
 <script>
 let currentId = null;
 
-db.collection('bookings').where('status','==','waiting').orderBy('number')
-  .onSnapshot(async snap => {
-    // تحديث الحالي (serving)
-    const servingSnap = await db.collection('bookings').where('status','==','serving').limit(1).get();
-    if (!servingSnap.empty) {
-      const d = servingSnap.docs[0];
-      currentId = d.id;
-      document.getElementById('currentNum').textContent = d.data().number;
-      document.getElementById('currentName').textContent = d.data().name;
-      document.getElementById('nextBtn').disabled = false;
-    } else {
-      currentId = null;
-      document.getElementById('currentNum').textContent = '-';
-      document.getElementById('currentName').textContent = 'لا يوجد';
-      document.getElementById('nextBtn').disabled = snap.empty;
-    }
+// الاستماع بدون فهارس
+db.collection('bookings').where('status','==','waiting').onSnapshot(async snap => {
+  const servingSnap = await db.collection('bookings').where('status','==','serving').limit(1).get();
+  
+  if (!servingSnap.empty) {
+    const d = servingSnap.docs[0];
+    currentId = d.id;
+    document.getElementById('currentNum').textContent = d.data().number;
+    document.getElementById('currentName').textContent = d.data().name;
+    document.getElementById('nextBtn').disabled = false;
+  } else {
+    currentId = null;
+    document.getElementById('currentNum').textContent = '-';
+    document.getElementById('currentName').textContent = 'لا يوجد';
+    document.getElementById('nextBtn').disabled = snap.empty;
+  }
 
-    // قائمة الانتظار
-    const list = document.getElementById('queueList');
-    if (snap.empty) {
-      list.innerHTML = '<div class="empty">لا يوجد حجوزات حالياً</div>';
-      return;
-    }
-    list.innerHTML = snap.docs.map(doc => {
-      const d = doc.data();
-      return `<div class="item">
-        <span><span class="n">#${d.number}</span> — ${d.name}</span>
-        <button class="del" onclick="removeBooking('${doc.id}')">حذف</button>
-      </div>`;
-    }).join('');
-  });
+  const list = document.getElementById('queueList');
+  if (snap.empty) {
+    list.innerHTML = '<div class="empty">لا يوجد حجوزات حالياً</div>';
+    return;
+  }
+
+  // ترتيب الحجوزات برمجياً بدل الفهارس
+  const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  docs.sort((a, b) => a.number - b.number);
+
+  list.innerHTML = docs.map(d => {
+    return `<div class="item">
+      <span><span class="n">#${d.number}</span> — ${d.name}</span>
+      <button class="del" onclick="removeBooking('${d.id}')">حذف</button>
+    </div>`;
+  }).join('');
+});
 
 async function nextCustomer() {
-  // إنهاء الحالي
   if (currentId) {
     await db.collection('bookings').doc(currentId).update({ status: 'done' });
   }
-  // بدء التالي
-  const snap = await db.collection('bookings').where('status','==','waiting').orderBy('number').limit(1).get();
+  // جلب التالي وترتيبه برمجياً
+  const snap = await db.collection('bookings').where('status','==','waiting').get();
   if (!snap.empty) {
-    await db.collection('bookings').doc(snap.docs[0].id).update({ status: 'serving' });
+    const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    docs.sort((a, b) => a.number - b.number);
+    await db.collection('bookings').doc(docs[0].id).update({ status: 'serving' });
   }
 }
 
