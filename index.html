@@ -51,10 +51,8 @@ let myDocId = localStorage.getItem('myBookingId');
 let lastStatus = '';
 let audioCtx = null;
 
-// طلب إذن الإشعارات
 if ("Notification" in window) Notification.requestPermission();
 
-// صوت التنبيه
 function playBeep(type) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -84,11 +82,13 @@ async function book() {
   btn.disabled = true; btn.textContent = 'جاري الحجز...';
 
   try {
-    // جلب أعلى رقم دور
-    const snap = await db.collection('bookings')
-      .where('status','==','waiting')
-      .orderBy('number','desc').limit(1).get();
-    const nextNum = snap.empty ? 1 : snap.docs[0].data().number + 1;
+    // جلب كل الحجوزات وحساب أعلى رقم بدون فهارس
+    const snap = await db.collection('bookings').where('status','==','waiting').get();
+    let maxNum = 0;
+    snap.forEach(doc => {
+      if (doc.data().number > maxNum) maxNum = doc.data().number;
+    });
+    const nextNum = maxNum + 1;
 
     const doc = await db.collection('bookings').add({
       name, number: nextNum, status: 'waiting',
@@ -116,7 +116,6 @@ function showTicket() {
   document.getElementById('ticketBox').style.display = 'block';
 }
 
-// الاستماع للتغييرات
 function listen() {
   if (!myDocId) {
     document.getElementById('loginBox').style.display = 'block';
@@ -135,12 +134,12 @@ function listen() {
     const data = doc.data();
     document.getElementById('myNumber').textContent = data.number;
 
-    // جلب عدد اللي قبله
-    const snap = await db.collection('bookings')
-      .where('status','==','waiting')
-      .where('number','<',data.number)
-      .get();
-    const ahead = snap.size;
+    // جلب عدد اللي قبله بدون فهارس
+    const snap = await db.collection('bookings').where('status','==','waiting').get();
+    let ahead = 0;
+    snap.forEach(d => {
+      if (d.data().number < data.number) ahead++;
+    });
 
     const statusEl = document.getElementById('myStatus');
     const infoEl = document.getElementById('queueInfo');
@@ -167,4 +166,4 @@ function listen() {
 listen();
 </script>
 </body>
-  </html>
+ </html>
